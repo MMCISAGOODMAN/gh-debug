@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gh-debug</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --cyan: #39c5cf;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    .logo { font-weight: 700; font-size: 18px; color: var(--accent); }
+    .badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge.running { background: #3d2e00; color: var(--yellow); }
+    .badge.paused { background: #0d419d33; color: var(--accent); }
+    .badge.failed { background: #490202; color: var(--red); }
+    .badge.done { background: #0f2d17; color: var(--green); }
+    .meta { color: var(--muted); font-size: 14px; }
+    .error-banner {
+      display: none;
+      padding: 12px 20px;
+      background: #490202;
+      border-bottom: 1px solid var(--red);
+      color: #ffb4b4;
+      font-size: 14px;
+    }
+    .error-banner.show { display: block; }
+    .finished-banner {
+      display: none;
+      padding: 12px 20px;
+      background: #0f2d17;
+      border-bottom: 1px solid var(--green);
+      color: #7ee787;
+      font-size: 14px;
+    }
+    .finished-banner.show { display: block; }
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: 0;
+    }
+    .steps-panel, .logs-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .steps-panel {
+      border-right: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .panel-title {
+      padding: 12px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .steps-list { overflow-y: auto; flex: 1; }
+    .step-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      cursor: default;
+      transition: background 0.15s;
+    }
+    .step-item.current { background: #1f2937; border-left: 3px solid var(--yellow); }
+    .step-row { display: flex; align-items: center; gap: 10px; }
+    .step-icon { width: 20px; text-align: center; font-size: 14px; }
+    .step-name { flex: 1; font-size: 14px; word-break: break-word; }
+    .step-dur { font-size: 12px; color: var(--muted); }
+    .step-item .bp { color: var(--red); margin-left: 4px; }
+    .logs-panel { background: var(--bg); }
+    .logs-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .log-line { white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+    .log-line.system { color: var(--muted); }
+    .log-line.header { color: var(--cyan); font-weight: 600; }
+    .log-line.stdout { color: var(--text); }
+    .log-line.stderr { color: #ffa198; }
+    .log-line.success { color: var(--green); }
+    .log-line.error { color: var(--red); font-weight: 600; }
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 20px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .status-text { font-size: 14px; color: var(--text); }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      background: #21262d;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    button:hover:not(:disabled) { background: #30363d; border-color: var(--muted); }
+    button.primary { background: #238636; border-color: #2ea043; color: #fff; }
+    button.primary:hover:not(:disabled) { background: #2ea043; }
+    button.danger { color: #ffb4b4; border-color: #872424; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .spinner { display: inline-block; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .running-dot { animation: pulse 1.2s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">gh-debug</div>
+    <div id="status-badge" class="badge paused">Paused</div>
+    <div class="meta" id="workflow-meta">—</div>
+  </header>
+  <div id="error-banner" class="error-banner"></div>
+  <div id="finished-banner" class="finished-banner"></div>
+  <main>
+    <section class="steps-panel">
+      <div class="panel-title">Steps</div>
+      <div id="steps" class="steps-list"></div>
+    </section>
+    <section class="logs-panel">
+      <div class="panel-title">Output</div>
+      <div id="logs" class="logs-scroll"></div>
+    </section>
+  </main>
+  <footer>
+    <div class="status-text" id="status-text">Connecting…</div>
+    <div class="controls">
+      <button class="primary" data-action="run" id="btn-run">▶ Run</button>
+      <button data-action="skip" id="btn-skip">Skip</button>
+      <button data-action="shell" id="btn-shell">Shell</button>
+      <button data-action="breakpoint" id="btn-bp">Breakpoint</button>
+      <button data-action="next" id="btn-next">Run to BP</button>
+      <button class="danger" data-action="cancel" id="btn-cancel">Cancel</button>
+      <button class="danger" data-action="quit" id="btn-quit">Quit</button>
+    </div>
+  </footer>
+  <script>
+    const SPINNER = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+    const ICONS = {
+      pending: '·', waiting: '⏸', running: '▶',
+      success: '✓', failed: '✗', skipped: '⊘'
+    };
+    const ICON_COLORS = {
+      pending: '#8b949e', waiting: '#58a6ff', running: '#d29922',
+      success: '#3fb950', failed: '#f85149', skipped: '#8b949e'
+    };
+    let state = null;
+    let sessionEnded = false;
+    let logsEl = document.getElementById('logs');
+    let autoScroll = true;
+
+    logsEl.addEventListener('scroll', () => {
+      autoScroll = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 40;
+    });
+
+    function sendAction(action) {
+      if (sessionEnded) return;
+      fetch('/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+      }).catch(() => {});
+    }
+
+    function setButtonsDisabled(disabled) {
+      document.querySelectorAll('button[data-action]').forEach(btn => {
+        btn.disabled = disabled;
+      });
+    }
+
+    document.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => sendAction(btn.dataset.action));
+    });
+
+    function render(s) {
+      state = s;
+      sessionEnded = s.finished;
+
+      const badge = document.getElementById('status-badge');
+      badge.className = 'badge';
+      if (s.running) { badge.classList.add('running'); badge.textContent = 'Running'; }
+      else if (s.finished && s.last_error) { badge.classList.add('failed'); badge.textContent = 'Ended'; }
+      else if (s.last_error) { badge.classList.add('failed'); badge.textContent = 'Failed'; }
+      else if (s.finished) { badge.classList.add('done'); badge.textContent = 'Done'; }
+      else { badge.classList.add('paused'); badge.textContent = 'Paused'; }
+
+      const elapsed = s.elapsed_secs != null ? ` · ${s.elapsed_secs.toFixed(1)}s` : '';
+      document.getElementById('workflow-meta').textContent =
+        `${s.workflow_name} · job: ${s.job_name} · step ${s.current_step + 1}/${s.total_steps}${elapsed}`;
+
+      const err = document.getElementById('error-banner');
+      const finishedEl = document.getElementById('finished-banner');
+      if (s.finished) {
+        err.classList.remove('show');
+        finishedEl.classList.add('show');
+        if (s.last_error) {
+          finishedEl.textContent = 'Session ended — job finished with errors. You can review the logs below.';
+        } else {
+          finishedEl.textContent = '✓ All steps completed — debugging session has ended.';
+        }
+      } else {
+        finishedEl.classList.remove('show');
+        if (s.last_error) { err.textContent = '✗ ' + s.last_error; err.classList.add('show'); }
+        else { err.classList.remove('show'); }
+      }
+
+      const spin = SPINNER[s.spinner_tick % SPINNER.length];
+      const statusEl = document.getElementById('status-text');
+      if (s.finished) {
+        statusEl.textContent = s.status_message || 'Session ended';
+      } else if (s.running) {
+        statusEl.textContent = `${spin} ${s.status_message}`;
+      } else {
+        statusEl.textContent = s.status_message;
+      }
+
+      document.getElementById('steps').innerHTML = s.steps.map(step => {
+        const icon = step.status === 'running'
+          ? `<span class="spinner">${spin}</span>`
+          : ICONS[step.status] || '·';
+        const color = ICON_COLORS[step.status] || '#8b949e';
+        const dur = step.duration_ms != null ? `${step.duration_ms}ms` : (step.status === 'running' ? '…' : '—');
+        return `<div class="step-item${step.is_current ? ' current' : ''}">
+          <div class="step-row">
+            <span class="step-icon" style="color:${color}">${icon}</span>
+            <span class="step-name">${step.index + 1}. ${esc(step.name)}${step.has_breakpoint ? '<span class="bp">●</span>' : ''}</span>
+            <span class="step-dur">${dur}</span>
+          </div>
+        </div>`;
+      }).join('');
+
+      logsEl.innerHTML = s.logs.map(l =>
+        `<div class="log-line ${l.kind}">${esc(l.text)}</div>`
+      ).join('') + (s.running ? `<div class="log-line system running-dot">${spin} waiting for output…</div>` : '');
+
+      if (autoScroll) logsEl.scrollTop = logsEl.scrollHeight;
+
+      if (s.finished) {
+        setButtonsDisabled(true);
+      } else {
+        const running = s.running;
+        document.getElementById('btn-run').disabled = running;
+        document.getElementById('btn-skip').disabled = running;
+        document.getElementById('btn-shell').disabled = running;
+        document.getElementById('btn-bp').disabled = running;
+        document.getElementById('btn-next').disabled = running;
+        document.getElementById('btn-cancel').disabled = !running;
+        document.getElementById('btn-quit').disabled = running;
+      }
+    }
+
+    function esc(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    const es = new EventSource('/api/events');
+    es.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch (_) {} };
+    es.onerror = () => {
+      if (sessionEnded) {
+        document.getElementById('status-text').textContent =
+          state?.status_message || 'Session ended — you can still review the logs above.';
+        setButtonsDisabled(true);
+      } else {
+        document.getElementById('status-text').textContent =
+          'Connection lost — is gh-debug still running?';
+      }
+    };
+  </script>
+</body>
+</html>

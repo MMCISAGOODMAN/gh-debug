@@ -1,0 +1,18 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# Session data
+.gh-debug/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Misc
+package-lock.json
+node_modules/
